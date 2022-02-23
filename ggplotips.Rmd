@@ -1,0 +1,372 @@
+---
+title: "A list of ggplot2 tips for quality plots"
+author: RF
+---
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(mizer)
+```
+
+
+
+There shall be no order in this markdown, just an endless succession of bits of code to plot nice things
+
+Things to know:
+
+- Format your dataframe correctly before starting, this is 90% of the work (help: reshape2::melt())
+- Check units within the dataframe. Numerics for continous var and factors for discretes ones
+
+- if you cannot do something in ggplot2, you probably shouldn't do it for a paper plot (looking at you double y axis)
+
+- ggplot2 is like an onion (or Shrek), just layers over layers.
+
+What datasets are we going to play with?
+
+```{r}
+data()
+```
+
+
+## Aesthetics 
+
+Var within `aes()` are taken from the df and added to the legend. Var outside are constants and do not appear in legend
+
+## Legends
+
+To overwrite colors legends
+
+```{r}
+scale_color_manual(values = c("red","black")) 
+```
+
+Can give a vector with a name, this will overwrite legend name too. "color" because we are coloring a line, but if it was a box plot it would be "fill" for example. "manual" because I decide which colors but it could be an automatic function such as "gradient".
+
+## Themes
+
+Some theme are already customized such as `theme_bw())` or `theme_minimal()`
+I like to write my own theme. Here are some examples
+
+```{r, eval = FALSE}
+legend.title=element_text(),
+panel.background = element_rect(fill = "white", color = "black"), # black for the contour, white for the background
+legend.position = "bottom", # self explanatory
+strip.background = element_blank(), # for panels, strip is the box with the var name. I don't like the grey
+legend.key = element_rect(fill = "white")) # background of the color/symbol in the legend. Still don't like grey
+```
+
+
+
+## Texts
+
+## Facets
+
+grid: good for looking at 2 var
+
+wrap: good to look at many facets grouped by one var
+
+## Guides
+
+Arguments in `guides()` take function named `guide_something()`
+
+e.g.
+
+```{r}
+guides(color = guide_legend(nrow=2))
+```
+
+To organise the legend to be displayed in 2 rows
+
+
+## Randos
+
+`coord_flip()`
+
+
+## geom_ribbon
+
+Ribbon take a ymin and ymax. One can use the standard deviation of a gam for geom_smooth (which is ugly) to create a personalised ribbon. Below non-working example because missing data
+
+```{r}
+# prepare the data for the ribbon (standard deviation)
+g1 <- ggplot(plot_dat[[1]])+
+  geom_smooth(aes(x = time, y = meanSp-sdSp, group = as.factor(sp))) +
+  geom_smooth(aes(x= time, y = meanSp+sdSp, group = as.factor(sp))) 
+gg1 <- ggplot_build(g1)
+dfRibbon1 <- data.frame(x = gg1$data[[1]]$x, ymin = gg1$data[[1]]$y, ymax = gg1$data[[2]]$y, group = gg1$data[[1]]$group) #and extract the smooth data for the ribbon
+
+p1 <- ggplot(plot_dat[[1]])+
+  geom_line(aes(x = time, y = meanSp, color = as.factor(sp)))+
+  geom_ribbon(data = dfRibbon1, aes(x = x, ymin = ymin, ymax = ymax, group = group), fill = "grey", alpha = 0.2)
+
+```
+
+
+# geom_pointrange
+
+```{r}
+
+edf <- readRDS("data/anovaDat.rds")
+
+#backtransform to orginal eta scale
+edf$fit <-exp(edf$fit)
+edf$lower <-exp(edf$lower)
+edf$upper <-exp(edf$upper)
+
+## plot effects
+edf$etaMean <-edf$fit
+
+# formating for nice plot
+edf$predation <- as.character(edf$predation)
+edf$fisheries <- as.character(edf$fisheries)
+edf$predation[which(edf$predation == 0)] <- "a) without predation"
+edf$predation[which(edf$predation == 1)] <- "b) with predation"
+edf$fisheries[which(edf$fisheries == 0)] <- "un-fished"
+edf$fisheries[which(edf$fisheries == 1)] <- "fished"
+
+
+fie <- readRDS(file = "data/anovaWeighted.rds") #weighted species mean (weighted by phenotype abundance) at year 6000
+fie$run <- fie$simulation
+fie$species <- as.factor(fie$species)
+fie$predation[which(fie$predation == 0)] <- "a) without predation"
+fie$predation[which(fie$predation == 1)] <- "b) with predation"
+fie$fisheries[which(fie$fisheries == 0)] <- "un-fished"
+fie$fisheries[which(fie$fisheries == 1)] <- "fished"
+
+
+ggplot(edf,aes(x=species,y=etaMean))  +
+  # geom_point(data=fie,color="dark grey",size=0.5,alpha=0.8)  +   
+  facet_wrap(~predation)+
+  geom_pointrange(data=edf,aes(color=fisheries,ymin=lower,ymax=upper),position=position_dodge(width=.1),alpha=0.8) +
+  # scale_color_manual(values = c("red","black")) +
+  # xlab("Species") + ylab("Eta") + 
+  # geom_hline(yintercept=0.25, linetype="dashed", color="grey")  +
+  # ylab(bquote(eta))  +
+  theme(
+    panel.background = element_rect(fill = "white", color = "black"),
+    legend.position = "bottom",
+    strip.background = element_blank(),
+    legend.key = element_rect(fill = "white"))
+
+# ggsave(p, file = "figures/Fig3.eps", units = "cm", width = 20, height = 15, device=cairo_ps)
+```
+# geom_errorbarh
+
+```{r}
+
+myDat <- readRDS("data/maxSize.rds")
+
+# Averaging across species/sim/scenario
+plot_dat <- NULL
+for(iSpecies in unique(myDat$species))
+{
+  for(iScenario in unique(myDat$scenario))
+  {
+    for(iFish in unique(myDat$fisheries))
+    {  
+      temp <- filter(myDat, species == iSpecies & scenario == iScenario & fisheries == iFish)
+      wmatMean <- mean(temp$maturationSize)
+      wmatSd <- sd(temp$maturationSize)
+      wmaxMean <- mean(temp$maxSizeTheoretical)
+      wmaxSd <- sd(temp$maxSizeTheoretical) 
+      plot_dat <- rbind(plot_dat,c(iSpecies,iScenario,iFish,wmatMean,wmatSd,wmaxMean,wmaxSd))
+    }
+  }
+}
+# formating the data
+plot_dat <- as.data.frame(plot_dat)
+colnames(plot_dat) <- c("species","scenario","fisheries","wmatMean","wmatSd","wmaxMean","wmaxSd")
+plot_dat$wmatMean <- as.numeric(as.character(plot_dat$wmatMean))
+plot_dat$wmatSd <- as.numeric(as.character(plot_dat$wmatSd))
+plot_dat$wmaxMean <- as.numeric(as.character(plot_dat$wmaxMean))
+plot_dat$wmaxSd <- as.numeric(as.character(plot_dat$wmaxSd))
+
+plot_dat$scenario <- as.character(plot_dat$scenario)
+plot_dat$scenario[which(plot_dat$scenario == "Sim9")] <- "predation"
+plot_dat$scenario[which(plot_dat$scenario == "SimNoInter9")] <- "no predation"
+
+plot_dat <- filter(plot_dat, fisheries != "init")
+plot_dat$fisheries <- as.character(plot_dat$fisheries)
+plot_dat$fisheries[which(plot_dat$fisheries == "normal")] <- "un-fished"
+plot_dat$fisheries[which(plot_dat$fisheries == "fisheries")] <- "fished"
+
+## add empirical data to the plot
+empDat <- readxl::read_excel("data/OlssonGislasonDATA.xlsx")
+empDat <- as.data.frame(empDat)
+
+empDat2 <- readxl::read_excel("data/marineSizeData.xlsx")
+empDat2 <- as.data.frame(empDat2)
+colnames(empDat2)[1] <- "species"
+empDat2$...5 <- NULL
+colnames(empDat2)[2] <- "Lmax"
+empDat2$wmax <- empDat2$a*empDat2$Lmax^(empDat2$b)
+empDat2$wmat <- empDat2$a*empDat2$Lmat^(empDat2$b)
+
+empDat3 <- readxl::read_excel("data/smallFish.xlsx")
+empDat3 <- as.data.frame(empDat3)
+# merge empirical data
+empDat1 <- empDat[,c("Wmat","Winf")]
+empDat2 <- empDat2[,c("wmat","wmax")]
+colnames(empDat2) <- colnames(empDat1)
+colnames(empDat3) <- colnames(empDat1)
+empDat <- rbind(empDat1,empDat2,empDat3)
+
+ggplot(filter(plot_dat)) +  
+  geom_pointrange(aes(x = wmaxMean, y = wmatMean,ymin = wmatMean - wmatSd, ymax = wmatMean + wmatSd, color = fisheries, shape = scenario), alpha = .8, size = 1) +
+  geom_errorbarh(aes(y = wmatMean,xmin = wmaxMean - wmaxSd, xmax = wmaxMean + wmaxSd, height = 1, color = fisheries)) +
+  # geom_point(data = empDat, aes(x = Winf, y = Wmat), color = "grey", shape = "*", size = 10) +
+  scale_x_continuous(trans = "log10", name = "Asymptotic size in g") +
+  scale_y_continuous(trans = "log10", name = "Maturation size in g") +
+  scale_color_manual(values = c("red","black")) +
+  theme(legend.title=element_text(),
+        panel.background = element_rect(fill = "white", color = "black"),
+        legend.position="bottom",
+        legend.key = element_rect(fill = "white"))+
+  ggtitle(NULL)
+
+# ggsave(p, file = "figures/Fig6.eps", units = "cm", width = 20, height = 20,device=cairo_ps)
+
+
+```
+
+## Violin plots
+
+```{r}
+# create a vector of PPMR bins
+min_PPMR <- 10
+max_PPMR <- 100000
+no_bin <- 13
+ppmrBin <- 10^(seq(from = log10(min_PPMR),to = log10(max_PPMR), length.out = no_bin))
+ppmrBin <- ppmrBin[-c(12,13)]
+dPPMR <- diff(ppmrBin)
+# Correctly defined dw by using the proper ratio 
+# (successive dw's have a fixed ratio). 
+# dw[no_w] <- dw[no_w - 1] * (dw[no_w - 1] / dw[no_w - 2])
+
+# Now, to put the phen in their bin
+myDat <- readRDS("data/traitDat.rds")
+myDat$kappa <- as.factor(myDat$kappa)
+myDat$species <- as.factor(myDat$species)
+kappa_vec <- c("0.05","0.1","0.2")
+SpIdx <- 1:5
+
+plot_dat <- NULL
+for(ikappa in kappa_vec)
+{
+  temp_dat <- filter(myDat, kappa == ikappa)
+  myMatrix <- matrix(0, nrow = 5, ncol = length(ppmrBin), dimnames = list("species" = 1:5, "PPMR" = ppmrBin))
+  
+  for(i in 1:dim(temp_dat)[1])
+  {
+    iSpecies <- temp_dat[i,]$species
+    iPPMR <- temp_dat[i,]$beta
+    iPPMR <- ppmrBin[sapply(iPPMR, function(i) which.min(abs(i - ppmrBin)))]
+    myMatrix[as.character(iSpecies),as.character(iPPMR)] <- myMatrix[as.character(iSpecies),as.character(iPPMR)] + temp_dat[i,]$biomass
+  }
+  ##get relative biomasses of each PPMR group for each species:
+  myMatrix <- myMatrix/rowSums(myMatrix)
+  kappa_dat <- reshape2::melt(myMatrix)
+  kappa_dat$kappa <- ikappa
+  plot_dat <- rbind(plot_dat,kappa_dat)
+}
+# plot_dat$PPMR <- log10(plot_dat$PPMR)
+plot_dat$PPMR <- round(plot_dat$PPMR)
+plot_dat$PPMR <- as.factor(plot_dat$PPMR)
+plot_dat$species <- as.factor(plot_dat$species)
+
+
+dat_text <- data.frame(
+  label = c("a)", "b)", "c)","d)","e)","f)","g)","h)","i)","j)","k)","l)","m)","n)","o)"),
+  kappa   = c(0.05,.1,.2),
+  species    = c(rep(1,3),rep(2,3),rep(3,3),rep(4,3),rep(5,3))
+)
+
+colfunc <- colorRampPalette(c("firebrick3","darkturquoise", "orange"))
+colGrad <- colfunc(length(SpIdx))
+
+ggplot(plot_dat) +
+  geom_bar(aes(x = PPMR, y = value , fill = species), stat = "identity") +
+  geom_bar(aes(x = PPMR, y = -value , fill = species), stat = "identity") +
+  coord_flip() +
+  scale_fill_manual(name = "species", values = colGrad)+ # color gradient
+  scale_x_discrete(breaks = c(1 %o% 10^(seq(1,5))))+
+  scale_y_continuous(name = "relative abundance proportion", breaks = c(0,.5))+
+  facet_grid(kappa ~ species) +
+  geom_text(size = 5, data = dat_text, mapping = aes(x =  Inf, y = -Inf, label = label), hjust = -0.75, vjust = 1.5) +
+  theme(legend.title=element_text(),
+        strip.background = element_blank(),
+        strip.text.x = element_blank(),
+        panel.background = element_rect(fill = "white", color = "black"),
+        panel.grid.minor = element_line(colour = "grey92"), 
+        legend.position="bottom",
+        legend.key = element_rect(fill = "white"))+
+  guides(fill = guide_legend(nrow = 1))+
+  ggtitle(NULL)
+```
+
+
+## ggrepel
+
+```{r}
+sim_guessed <- project(NS_params)
+plot_dat <- as.data.frame(getRDI(sim_guessed@params)/getRDD(sim_guessed@params))
+plot_dat$species <- factor(rownames(plot_dat),sim_guessed@params@species_params$species)
+colnames(plot_dat)[1] <- "ratio"
+plot_dat$w_inf <- sim_guessed@params@species_params$w_inf
+
+ggplot(plot_dat)+
+   geom_point(aes(x = w_inf, y = ratio, color = species), size = 6, alpha = .8) +
+   ggrepel::geom_text_repel(aes(x = w_inf, y = ratio, label = species), hjust = 0, nudge_x = 0.05)+
+   scale_y_continuous(name = "Density-independent / density-dependent reproduction rate", trans = "log10") +
+   scale_x_continuous(name = "Asymptotic size (g)", trans = "log10") +
+   scale_colour_manual(values = sim_guessed@params@linecolour) +
+   theme(panel.background = element_blank(), 
+         panel.border = element_rect(colour = "gray", fill=NA, size=.5),
+         text = element_text(size=10),
+         panel.grid.minor = element_line(color = "gray"),
+         legend.position = "bottom",legend.key = element_rect(fill = "white"))
+
+
+```
+
+
+
+## maps
+
+```{r}
+
+
+
+
+```library(ozmaps)
+library(tidyverse)
+library(sf)
+library(ggspatial)
+
+oz_states <- ozmaps::ozmap_states
+
+capital <- data.frame("name" = c("Hobart","Launceston"), "lat"= c(-42.8821, -41.4391), "lon"= c(147.3272, 147.1358))
+
+### polygons
+
+test <- data.frame(x = c(145,145.5,144.5,144), y = c(-40,-42,-41.5,-40.5))
+
+ggplot(filter(oz_states, NAME == "Tasmania" )) +
+  geom_polygon(data = test, aes(x = x, y=y), alpha = .25)+
+  geom_sf(alpha = 1) +
+  geom_point(data = capital, aes(x = lon, y = lat, color = name), shape = 18, size = 5,) +
+  annotation_scale(location = "bl", width_hint = 0.25) +
+  ggrepel::geom_text_repel(data = capital, aes(x = lon, y = lat, label = name)) +
+  scale_color_manual(values = c("red","black")) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+                         pad_x = unit(0.25, "in"), pad_y = unit(0.25, "in"),
+                         style = north_arrow_fancy_orienteering) +
+  # geom_raster(data = r.pts@data[1:20,], aes(x = long, y = lat, fill = layer))+
+  geom_polygon(data = test, aes(x = x, y=y), alpha = .25)+
+  theme(legend.position = "none")
+
+
+
+
+
